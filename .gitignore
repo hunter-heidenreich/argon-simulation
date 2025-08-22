@@ -98,3 +98,7 @@ Desktop.ini
 *.lammpstrj
 *.lammpstrj.*
 *.lammps
+
+# Repo-specific
+artifacts/
+cache/

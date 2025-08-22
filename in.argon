@@ -128,7 +128,7 @@ unfix          NVT_thermo
 print          "--- Starting NVE Production Run (10 ps) ---"
 reset_timestep 0
 fix            NVE_integrator all nve
-thermo         10
+thermo         1
 
 # Output the final trajectory every 0.002 ps (1 steps) for analysis
 dump           prod_dump all custom 1 traj.lammpstrj id type xu yu zu vx vy vz

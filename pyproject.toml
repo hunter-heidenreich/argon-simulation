@@ -8,4 +8,10 @@ dependencies = [
     "matplotlib>=3.10.5",
     "numpy>=2.2.6",
     "scipy>=1.15.3",
+    "tqdm>=4.67.1",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.10",
 ]
