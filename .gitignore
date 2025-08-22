@@ -93,3 +93,8 @@ ipython_config.py
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# LAMMPS
+*.lammpstrj
+*.lammpstrj.*
+*.lammps
