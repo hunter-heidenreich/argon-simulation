@@ -1,0 +1,139 @@
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# A Modern Replication of A. Rahman's 1964 Liquid Argon Simulation
+#
+# Author:      Hunter Heidenreich
+# Date:        August 18, 2025
+# Portfolio:   [Your Portfolio URL]
+#
+# Purpose:
+# This script uses the LAMMPS molecular dynamics package to replicate the
+# seminal 1964 study by A. Rahman on the correlations in the motion of
+# atoms in liquid Argon. It aims to reproduce the physical conditions
+# of the original paper while employing modern, robust simulation techniques.
+#
+# Reference:
+# A. Rahman, Phys. Rev. 136, A405 (1964)
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+# ------------------------------------------------------------------------------
+# INITIALIZATION & UNITS
+# ------------------------------------------------------------------------------
+units          real
+atom_style     atomic
+log            log.lammps
+
+
+# ------------------------------------------------------------------------------
+# SYSTEM PARAMETERS (from Rahman, 1964)
+# ------------------------------------------------------------------------------
+# --- Primary Simulation Parameters
+variable       T equal 94.4         # Target Temperature (K)
+variable       N equal 864          # Number of atoms
+
+# --- Lennard-Jones Potential Parameters
+variable       massAMU equal 39.95      # Mass of Argon in AMU
+variable       sigma equal 3.4          # sigma = 3.4 Angstrom
+variable       epsilon equal 0.23846    # epsilon/kB = 120 K
+variable       cutoff equal 2.25*${sigma} # Cutoff = 2.25*sigma
+
+
+# ------------------------------------------------------------------------------
+# SIMULATION BOX & ATOM SETUP
+# ------------------------------------------------------------------------------
+# Box length is defined in the paper as 10.229 * sigma
+variable       L equal 10.229*${sigma}
+region         box block 0 ${L} 0 ${L} 0 ${L}
+create_box     1 box
+
+# Pre-calculate the lattice constant for a 6x6x6 tiling of FCC unit cells.
+# The 'equal'-style variable evaluates the mathematical expression.
+variable       latconst equal ${L}/6.0
+lattice        fcc ${latconst}
+create_atoms   1 box
+
+# Assign mass and potential coefficients
+mass           1 ${massAMU}
+pair_style     lj/cut ${cutoff}
+pair_coeff     1 1 ${epsilon} ${sigma}
+neighbor       2.0 bin
+neigh_modify   every 1 delay 0 check yes
+
+
+# ==============================================================================
+# SIMULATION WORKFLOW
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. ENERGY MINIMIZATION
+# ------------------------------------------------------------------------------
+# Methodology Note (Difference from 1964):
+# The original paper does not mention an energy minimization step. This is a
+# modern best practice to relax the initial structure and remove high-energy
+# overlaps from the crystal lattice, ensuring numerical stability.
+#
+print          "--- Starting Energy Minimization ---"
+thermo         100
+minimize       1.0e-4 1.0e-6 1000 10000
+
+
+# ------------------------------------------------------------------------------
+# 2. EQUILIBRATION | NVT Ensemble | 200 ps
+# ------------------------------------------------------------------------------
+# Methodology Note (Difference from 1964):
+# The 1964 study used a simple one-time velocity scaling to set the
+# initial temperature. This script employs a more robust, modern
+# approach: a 500 ps NVT (isothermal-isochoric) equilibration run.
+#
+# Justification:
+# 1. Melts the System: This run allows the initial FCC crystal to "melt"
+#    into a disordered liquid, fulfilling the "arbitrary positions"
+#    condition of the original work.
+# 2. Ensures Thermal Equilibrium: The Nose-Hoover thermostat (`fix nvt`)
+#    ensures the system reaches a stable thermal equilibrium where kinetic
+#    and potential energies are properly distributed. This is a more
+#    reliable method than a single velocity scaling.
+#
+print          "--- Starting NVT Equilibration (200 ps) ---"
+
+velocity       all create ${T} 54321 mom yes rot yes dist gaussian
+timestep       2.0
+fix            NVT_thermo all nvt temp ${T} ${T} $(100.0*dt)
+
+thermo_style   custom step time temp press density
+thermo         1000
+
+run            500000
+
+unfix          NVT_thermo
+
+
+# ------------------------------------------------------------------------------
+# 3. PRODUCTION RUN | NVE Ensemble | 10 ps
+# ------------------------------------------------------------------------------
+# This NVE (microcanonical) run is the core of the simulation, directly
+# mimicking the dynamics of the original study where the system evolves
+# with constant energy according to classical equations of motion.
+#
+# Methodology Note (Difference from 1964):
+# The original work used a custom predictor-corrector integrator and a 10 fs
+# timestep. This script uses the standard Velocity Verlet
+# algorithm with a 2 fs timestep.
+#
+# Justification:
+# The Velocity Verlet algorithm is the modern standard for MD, offering
+# excellent energy conservation and stability. The smaller 2 fs timestep
+# provides a more accurate numerical integration than the large 10 fs step.
+#
+print          "--- Starting NVE Production Run (10 ps) ---"
+reset_timestep 0
+fix            NVE_integrator all nve
+thermo         10
+
+# Output the final trajectory every 0.002 ps (1 steps) for analysis
+dump           prod_dump all custom 1 traj.lammpstrj id type xu yu zu vx vy vz
+
+run            5000
+
+print "--- Simulation Complete ---"
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ End of Script ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
