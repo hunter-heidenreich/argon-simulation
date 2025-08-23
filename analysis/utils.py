@@ -27,8 +27,8 @@ CONSTANTS = {
     "A_fs_to_m_s": 1.0e5,  # Angstrom/femtosecond to m/s conversion
     "HBAR_SI": 1.05457e-34,  # Reduced Planck constant in J·s
     "TIMESTEP_FS": 2.0,  # Simulation timestep in femtoseconds
-    "TEMPERATURE": 94.4,  # Simulation temperature in K [cite: 29]
-    "D_PAPER": 2.43e-5,  # Diffusion coefficient in cm^2/s [cite: 182]
+    "TEMPERATURE": 94.4,  # Simulation temperature in K
+    "D_PAPER": 2.43e-5,  # Diffusion coefficient in cm^2/s
 }
 
 
@@ -159,6 +159,19 @@ def cached_computation(operation: str, **cache_kwargs):
                             if r_key in cached_data and gdt_key in cached_data:
                                 gdt_result[float(t_lag)] = (cached_data[r_key], cached_data[gdt_key])
                     return gdt_result
+                elif operation == "gs":
+                    gs_result = {}
+                    if "time_lags" in cached_data:
+                        for t_lag in cached_data["time_lags"]:
+                            r_key = f"r_values_{t_lag}"
+                            gs_key = f"gs_values_{t_lag}"
+                            if r_key in cached_data and gs_key in cached_data:
+                                gs_result[float(t_lag)] = (cached_data[r_key], cached_data[gs_key])
+                    return gs_result
+                elif operation == "displacement_moments":
+                    return cached_data["moments"]
+                elif operation == "gr":
+                    return cached_data["r"], cached_data["g_r"], cached_data["density"]
                 else:
                     return cached_data
 
@@ -203,6 +216,27 @@ def cached_computation(operation: str, **cache_kwargs):
                 _cache_manager.save_cached_data(
                     source_path, operation, cache_data, **cache_params
                 )
+            elif operation == "gs" and result is not None:
+                cache_data = {}
+                for t_lag, (r_vals, gs_vals) in result.items():
+                    cache_data[f"r_values_{t_lag}"] = r_vals
+                    cache_data[f"gs_values_{t_lag}"] = gs_vals
+                cache_data["time_lags"] = np.array(list(result.keys()))
+                _cache_manager.save_cached_data(
+                    source_path, operation, cache_data, **cache_params
+                )
+            elif operation == "displacement_moments" and result is not None:
+                 cache_data = {"moments": result}
+                 _cache_manager.save_cached_data(
+                    source_path, operation, cache_data, **cache_params
+                )
+            elif operation == "gr" and result is not None:
+                r, g_r, density = result
+                cache_data = {"r": r, "g_r": g_r, "density": density}
+                _cache_manager.save_cached_data(
+                    source_path, operation, cache_data, **cache_params
+                )
+
 
             return result
 
@@ -601,6 +635,124 @@ def compute_gdt(filename: str, t_lags_ps: list, dr: float = 0.05) -> dict:
         results[t_ps] = (r_values, gdt_values)
 
     return results
+
+@cached_computation("gs")
+def compute_gs(filename: str, t_lags_ps: list, dr: float = 0.05) -> dict:
+    """
+    Computes the self-part of the Van Hove correlation function, G_s(r, t).
+
+    Args:
+        filename: Path to the LAMMPS trajectory file.
+        t_lags_ps: A list of time lags in picoseconds.
+        dr: The bin width for the radial distance (in Angstroms).
+
+    Returns:
+        A dictionary where keys are time lags (ps) and values are (r_values, gs_values).
+    """
+    positions, _, box_dims_all = load_trajectory_data(filename)
+    n_frames, n_atoms, _ = positions.shape
+    box_dims = box_dims_all.mean(axis=0)
+    max_r = np.min(box_dims) / 2.0
+    bins = np.arange(0, max_r + dr, dr)
+    r_values = bins[:-1] + dr / 2.0
+    shell_volumes = 4.0 * np.pi * r_values**2 * dr
+
+    dt_lags = [int(t_ps * 1000 / CONSTANTS["TIMESTEP_FS"]) for t_ps in t_lags_ps]
+    results = {}
+
+    for i, dt in enumerate(dt_lags):
+        t_ps = t_lags_ps[i]
+        logger.info(f"Calculating G_s(r, t) for t = {t_ps} ps (dt = {dt} steps)...")
+
+        if dt >= n_frames:
+            logger.warning(f"Time lag {t_ps} ps is too large. Skipping.")
+            continue
+
+        displacements = positions[dt:] - positions[:-dt]
+        distances = np.linalg.norm(displacements, axis=2).flatten()
+        
+        counts, _ = np.histogram(distances, bins=bins)
+        
+        # Normalize by the number of samples and shell volume
+        n_samples = (n_frames - dt) * n_atoms
+        gs_values = counts / (n_samples * shell_volumes)
+        results[t_ps] = (r_values, gs_values)
+        
+    return results
+
+@cached_computation("displacement_moments")
+def compute_displacement_moments(filename: str) -> np.ndarray:
+    """
+    Computes the moments <r^2n> of the displacement for n=1, 2, 3, 4.
+
+    Returns:
+        A numpy array of shape (n_frames, 4) where columns correspond to
+        n=1, 2, 3, 4.
+    """
+    positions, _, _ = load_trajectory_data(filename)
+    n_frames = positions.shape[0]
+    moments = np.zeros((n_frames, 4))
+
+    for dt in tqdm(range(1, n_frames), desc="Computing displacement moments"):
+        displacements = positions[dt:] - positions[:-dt]
+        r_squared = np.sum(displacements**2, axis=2)
+        
+        moments[dt, 0] = np.mean(r_squared)
+        moments[dt, 1] = np.mean(r_squared**2)
+        moments[dt, 2] = np.mean(r_squared**3)
+        moments[dt, 3] = np.mean(r_squared**4)
+        
+    return moments
+
+
+@cached_computation("gr")
+def calculate_gr(filename: str, dr: float = 0.05):
+    """Calculates the pair correlation function g(r) from the last frame."""
+    positions, _, box_dims_all = load_trajectory_data(filename)
+    
+    positions_last_frame = positions[-1]
+    box_dims = box_dims_all.mean(axis=0)
+    
+    num_atoms = positions_last_frame.shape[0]
+    volume = np.prod(box_dims)
+    density = num_atoms / volume
+    max_r = np.min(box_dims) / 2.0
+
+    bins = np.arange(0, max_r + dr, dr)
+    num_bins = len(bins) - 1
+    g_r = np.zeros(num_bins)
+
+    for i in tqdm(range(num_atoms), desc="Calculating g(r)", unit="atom"):
+        rij = positions_last_frame[i] - positions_last_frame
+        rij -= box_dims * np.round(rij / box_dims)
+        r = np.linalg.norm(rij, axis=1)
+        r[i] = np.inf # Exclude self
+        
+        hist, _ = np.histogram(r, bins=bins)
+        g_r += hist
+        
+    r_values = bins[:-1] + dr / 2.0
+    shell_volumes = 4.0 * np.pi * r_values**2 * dr
+    n_ideal = density * shell_volumes
+    
+    # CORRECTED LINE: Removed the erroneous extra factor of (num_atoms - 1)
+    g_r /= (num_atoms * n_ideal)
+
+    return r_values, g_r, density
+
+
+def fourier_transform_3d(r, func_r, k):
+    """Performs a 3D Fourier transform on an isotropic function f(r)."""
+    integrand = 4 * np.pi * r**2 * func_r * np.sinc(k[:, np.newaxis] * r / np.pi)
+    f_k = np.trapezoid(integrand, r, axis=1)
+    return f_k
+
+def inverse_fourier_transform_3d(k, func_k, r):
+    """Performs an inverse 3D Fourier transform on an isotropic function f(k)."""
+    integrand = (1 / (2 * np.pi**2)) * k**2 * func_k * np.sinc(r[:, np.newaxis] * k / np.pi)
+    f_r = np.trapezoid(integrand, k, axis=1)
+    return f_r
+
 
 def get_cache_info() -> Dict[str, Any]:
     """Get information about cached data."""
