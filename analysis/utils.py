@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, Union
 from functools import wraps
 
 import numpy as np
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,16 @@ def cached_computation(operation: str, **cache_kwargs):
                     return cached_data["msd"]
                 elif operation == "vacf":
                     return cached_data["vacf"]
+                elif operation == "gdt":
+                    # Reconstruct the nested structure from flattened cache
+                    gdt_result = {}
+                    if "time_lags" in cached_data:
+                        for t_lag in cached_data["time_lags"]:
+                            r_key = f"r_values_{t_lag}"
+                            gdt_key = f"gdt_values_{t_lag}"
+                            if r_key in cached_data and gdt_key in cached_data:
+                                gdt_result[float(t_lag)] = (cached_data[r_key], cached_data[gdt_key])
+                    return gdt_result
                 else:
                     return cached_data
 
@@ -178,6 +189,17 @@ def cached_computation(operation: str, **cache_kwargs):
                 )
             elif operation == "vacf" and result is not None:
                 cache_data = {"vacf": result}
+                _cache_manager.save_cached_data(
+                    source_path, operation, cache_data, **cache_params
+                )
+            elif operation == "gdt" and result is not None:
+                # For gdt, we need to flatten the nested structure for caching
+                # result is a dict: {t_lag: (r_values, gdt_values), ...}
+                cache_data = {}
+                for t_lag, (r_vals, gdt_vals) in result.items():
+                    cache_data[f"r_values_{t_lag}"] = r_vals
+                    cache_data[f"gdt_values_{t_lag}"] = gdt_vals
+                cache_data["time_lags"] = np.array(list(result.keys()))
                 _cache_manager.save_cached_data(
                     source_path, operation, cache_data, **cache_params
                 )
@@ -504,6 +526,81 @@ def langevin_spectrum(beta: np.ndarray, mass_amu: float, D_cm2_s: float) -> np.n
 
     return lam**2 / (lam**2 + beta**2)
 
+@cached_computation("gdt")
+def compute_gdt(filename: str, t_lags_ps: list, dr: float = 0.05) -> dict:
+    """
+    Computes the time-dependent pair correlation function G_d(r, t) for specified time lags.
+
+    This function averages over all possible time origins in the trajectory.
+
+    Args:
+        filename: Path to the LAMMPS trajectory file.
+        t_lags_ps: A list of time lags in picoseconds for which to calculate G_d(r, t).
+        dr: The bin width for the radial distance (in Angstroms).
+
+    Returns:
+        A dictionary where keys are the time lags (in ps) and values are tuples
+        containing (r_values, gdt_values).
+    """
+    positions, _, box_dims_all = load_trajectory_data(filename)
+    n_frames, n_atoms, _ = positions.shape
+
+    # Use an average box dimension for normalization
+    box_dims = box_dims_all.mean(axis=0)
+    volume = np.prod(box_dims)
+
+    # Setup bins for histogram
+    max_r = np.min(box_dims) / 2.0
+    bins = np.arange(0, max_r + dr, dr)
+    r_values = bins[:-1] + dr / 2.0
+    shell_volumes = 4.0 * np.pi * r_values**2 * dr
+    
+    # Normalization factor for an ideal gas
+    n_ideal = (n_atoms - 1) / volume * shell_volumes
+
+    # Convert time lags from picoseconds to integer timesteps
+    dt_lags = [int(t_ps * 1000 / CONSTANTS["TIMESTEP_FS"]) for t_ps in t_lags_ps]
+
+    results = {}
+
+    for i, dt in enumerate(dt_lags):
+        t_ps = t_lags_ps[i]
+        logger.info(f"Calculating G_d(r, t) for t = {t_ps} ps (dt = {dt} steps)...")
+        
+        if dt >= n_frames:
+            logger.warning(f"Time lag {t_ps} ps is too large for the trajectory length. Skipping.")
+            continue
+
+        total_counts = np.zeros(len(r_values))
+        num_origins = n_frames - dt
+
+        # Average over all possible time origins
+        for t0 in tqdm(range(num_origins), desc=f"Lag {t_ps} ps", unit="origin"):
+            pos_initial = positions[t0]
+            pos_final = positions[t0 + dt]
+            
+            # Vectorized calculation of all-pairs distances
+            displacements = pos_final[np.newaxis, :, :] - pos_initial[:, np.newaxis, :]
+            
+            # Apply periodic boundary conditions
+            displacements -= box_dims * np.round(displacements / box_dims)
+            
+            distances = np.linalg.norm(displacements, axis=2)
+            
+            # Exclude self-correlation (i -> i)
+            np.fill_diagonal(distances, np.inf)
+
+            # Histogram the distances and add to total
+            counts, _ = np.histogram(distances.flatten(), bins=bins)
+            total_counts += counts
+
+        # Normalize the histogram to get G_d(r, t)
+        # The normalization is by the total number of pairs considered (N_origins * N_atoms)
+        # and the ideal gas distribution for N-1 particles.
+        gdt_values = total_counts / (num_origins * n_atoms * n_ideal)
+        results[t_ps] = (r_values, gdt_values)
+
+    return results
 
 def get_cache_info() -> Dict[str, Any]:
     """Get information about cached data."""
