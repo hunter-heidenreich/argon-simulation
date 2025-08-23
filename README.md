@@ -6,7 +6,7 @@
 
 > **Reproducing the foundations of molecular dynamics simulation**
 
-A comprehensive analysis toolkit for reproducing the groundbreaking results from **Aneesur Rahman's 1964 paper** *"Correlations in the Motion of Atoms in Liquid Argon"* ([Physical Review 136, A405](https://doi.org/10.1103/PhysRev.136.A405)). This seminal work founded the field of molecular dynamics simulation by demonstrating its power to reveal microscopic, time-dependent behavior in liquids.
+A toolkit for reproducing the results from **Aneesur Rahman's 1964 paper** *"Correlations in the Motion of Atoms in Liquid Argon"* ([Physical Review 136, A405](https://doi.org/10.1103/PhysRev.136.A405)). This seminal work founded the field of molecular dynamics simulation by demonstrating its power to reveal microscopic, time-dependent behavior in liquids.
 
 ## 🔬 About Rahman's 1964 Paper
 
@@ -79,130 +79,6 @@ argon-sim/
 ├── Makefile                 # Easy-to-use commands
 └── pyproject.toml           # Project configuration
 ```
-
-## 🔧 Usage Examples
-
-### Basic Analysis
-```python
-from argon_sim import (
-    compute_temperatures, 
-    compute_msd, 
-    compute_radial_distribution,
-    CONSTANTS
-)
-
-# Load and analyze trajectory
-temperatures = compute_temperatures("traj.lammpstrj")
-msd = compute_msd("traj.lammpstrj")
-r_values, g_r, density = compute_radial_distribution("traj.lammpstrj")
-
-print(f"Average temperature: {temperatures.mean():.1f} K")
-print(f"Target temperature: {CONSTANTS['TEMPERATURE']} K")
-```
-
-### Cache Management
-```python
-from argon_sim.caching import CacheManager
-
-# Check cache status
-cache = CacheManager()
-print(f"Cache entries: {len(cache.get_all_keys())}")
-
-# Clear specific cached computations
-cache.clear_computation("msd")  # Clear only MSD cache
-cache.clear_all()               # Clear all cache
-```
-
-### Advanced Analysis
-```python
-import numpy as np
-from argon_sim import compute_vacf, CONSTANTS
-
-# Compute velocity autocorrelation
-vacf = compute_vacf("traj.lammpstrj")
-
-# Analyze time correlation
-n_frames = len(vacf)
-time_ps = np.arange(n_frames) * CONSTANTS["TIMESTEP_FS"] / 1000.0
-
-# Analysis reveals deviations from simple Brownian motion
-print(f"VACF at t=0: {vacf[0]:.3f}")
-print(f"First minimum around: {time_ps[np.argmin(vacf[:100])]:.2f} ps")
-```
-
-## 📈 Key Results
-
-| Property | Rahman 1964 | This Analysis | Units |
-|----------|-------------|---------------|-------|
-| Temperature | 94.4 | ~94.4 | K |
-| Diffusion Coefficient | 2.43×10⁻⁵ | ~2.4×10⁻⁵ | cm²/s |
-| Density | ~1.374 | ~1.37 | g/cm³ |
-
-### Computational Insights
-- **VACF "Back-scattering"** - Negative correlation at ~0.3 ps showing atomic caging
-- **Non-Gaussian Diffusion** - Intermediate-time deviations from Gaussian displacement
-- **Liquid Structure** - Well-defined first coordination shell in g(r)
-
-## ⚡ Performance & Caching
-
-The analysis includes an intelligent caching system that speeds up repeated calculations:
-
-```bash
-# First run: ~30 seconds for MSD calculation
-make figure-3
-
-# Subsequent runs: ~2 seconds (cached)
-make figure-3
-
-# Check cache usage
-make cache-info
-```
-
-Cache automatically invalidates when source files change, ensuring accurate results.
-
-## 🧪 Scientific Validation
-
-This implementation reproduces key findings from Rahman's paper:
-
-1. **Atomic Motion Complexity** - VACF shows oscillatory behavior, not simple exponential decay
-2. **Diffusion Mechanisms** - MSD reveals ballistic → diffusive regimes  
-3. **Liquid Structure** - g(r) shows characteristic liquid peaks and coordination
-4. **Time Correlations** - Van Hove functions reveal space-time coupling in liquid dynamics
-
-## 🛠️ Development
-
-### Code Quality
-```bash
-make lint     # Check code style with ruff
-make format   # Auto-format code
-make check    # Run all checks
-```
-
-### Adding New Analyses
-1. Create analysis function in appropriate module (`src/argon_sim/`)
-2. Add `@cached_computation` decorator for expensive operations
-3. Create script in `scripts/` directory
-4. Add Makefile target for easy execution
-
-## 📚 Scientific Background
-
-Rahman's approach integrates Newton's equations of motion with the Lennard-Jones potential:
-
-**Force Integration:**
-```
-F_i = m * a_i = -∇_i U({r_j})
-```
-
-**Lennard-Jones Potential:**
-```
-U(r) = 4ε[(σ/r)¹² - (σ/r)⁶]
-```
-
-**Key Observables:**
-- **Mean Square Displacement**: `⟨|r(t) - r(0)|²⟩` 
-- **Velocity Autocorrelation**: `⟨v(0)·v(t)⟩`
-- **Van Hove G_s(r,t)**: Self-part correlation function
-- **Van Hove G_d(r,t)**: Distinct-part correlation function
 
 ## 📄 Citation
 
