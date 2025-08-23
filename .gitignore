@@ -100,5 +100,10 @@ Desktop.ini
 *.lammps
 
 # Repo-specific
-artifacts/
+artifacts/*.png
+artifacts/*.log
 cache/
+README_old.md
+
+# Keep example artifacts for reference
+!artifacts/.gitkeep

@@ -3,7 +3,6 @@
 #
 # Author:      Hunter Heidenreich
 # Date:        August 18, 2025
-# Portfolio:   [Your Portfolio URL]
 #
 # Purpose:
 # This script uses the LAMMPS molecular dynamics package to replicate the
@@ -41,18 +40,17 @@ variable       cutoff equal 2.25*${sigma} # Cutoff = 2.25*sigma
 # ------------------------------------------------------------------------------
 # SIMULATION BOX & ATOM SETUP
 # ------------------------------------------------------------------------------
-# Box length is defined in the paper as 10.229 * sigma
+# --- Box Dimensions
 variable       L equal 10.229*${sigma}
 region         box block 0 ${L} 0 ${L} 0 ${L}
 create_box     1 box
 
-# Pre-calculate the lattice constant for a 6x6x6 tiling of FCC unit cells.
-# The 'equal'-style variable evaluates the mathematical expression.
+# --- Lattice Setup / Atom Creation
 variable       latconst equal ${L}/6.0
 lattice        fcc ${latconst}
 create_atoms   1 box
 
-# Assign mass and potential coefficients
+# --- Mass and Potential Coefficients
 mass           1 ${massAMU}
 pair_style     lj/cut ${cutoff}
 pair_coeff     1 1 ${epsilon} ${sigma}
@@ -78,7 +76,7 @@ minimize       1.0e-4 1.0e-6 1000 10000
 
 
 # ------------------------------------------------------------------------------
-# 2. EQUILIBRATION | NVT Ensemble | 200 ps
+# 2. EQUILIBRATION | NVT Ensemble | 500 ps
 # ------------------------------------------------------------------------------
 # Methodology Note (Difference from 1964):
 # The 1964 study used a simple one-time velocity scaling to set the
@@ -94,7 +92,7 @@ minimize       1.0e-4 1.0e-6 1000 10000
 #    and potential energies are properly distributed. This is a more
 #    reliable method than a single velocity scaling.
 #
-print          "--- Starting NVT Equilibration (200 ps) ---"
+print          "--- Starting NVT Equilibration (500 ps) ---"
 
 velocity       all create ${T} 54321 mom yes rot yes dist gaussian
 timestep       2.0
@@ -117,8 +115,7 @@ unfix          NVT_thermo
 #
 # Methodology Note (Difference from 1964):
 # The original work used a custom predictor-corrector integrator and a 10 fs
-# timestep. This script uses the standard Velocity Verlet
-# algorithm with a 2 fs timestep.
+# timestep. This script uses the standard Velocity Verlet algorithm with a 2 fs timestep.
 #
 # Justification:
 # The Velocity Verlet algorithm is the modern standard for MD, offering
